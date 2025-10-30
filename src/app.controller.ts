@@ -99,4 +99,30 @@ export class AppController {
   async getDriverByEmail(@Query('email') email: string) {
     return firstValueFrom(this.authClient.send({ cmd: 'driver/email' }, email));
   }
+  @Get('auth/confirm')
+  async confirmEmail(@Query('token') token: string) {
+    return firstValueFrom(
+      this.authClient.send({ cmd: 'confirm-registration' }, token),
+    );
+  }
+
+  // ------------------- PASSWORD RESET -------------------
+
+  // 1️⃣ Forgot Password (send OTP to email)
+  @Post('auth/forgot-password')
+  async forgotPassword(@Body('email') email: string) {
+    return firstValueFrom(
+      this.authClient.send({ cmd: 'forgot-password' }, email),
+    );
+  }
+
+  // 2️⃣ Reset Password (verify OTP + new password)
+  @Post('auth/reset-password')
+  async resetPassword(
+    @Body() body: { email: string; otp: string; newPassword: string },
+  ) {
+    return firstValueFrom(
+      this.authClient.send({ cmd: 'reset-password' }, body),
+    );
+  }
 }
