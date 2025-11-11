@@ -1,52 +1,50 @@
+/* eslint-disable @typescript-eslint/no-unsafe-call */
 /* eslint-disable @typescript-eslint/no-unsafe-assignment */
 /* eslint-disable @typescript-eslint/no-unsafe-member-access */
 /* eslint-disable @typescript-eslint/no-unsafe-return */
-/* eslint-disable prettier/prettier */
-// /* eslint-disable prettier/prettier */
-// /* eslint-disable @typescript-eslint/no-unsafe-return */
-// /* eslint-disable @typescript-eslint/no-unsafe-assignment */
-// import { Controller, Get, Post, Body } from '@nestjs/common';
-// import { Client, ClientTCP, Transport } from '@nestjs/microservices';
-// import { lastValueFrom } from 'rxjs'; // Import lastValueFrom from rxjs
-
-// @Controller()
-// export class AppController {
-//   @Client({
-//     transport: Transport.TCP,
-//     options: { host: '127.0.0.1', port: 5002 },
-//   })
-//   client: ClientTCP;
-
-//   // Define a handler for the root path (GET /)
-//   @Get()
-//   getHello(): string {
-//     return 'Hello from API Gateway!'; // Return a message when the root path is accessed
-//   }
-
-//   // Register route (for testing TCP communication)
-//   @Post('register')
-//   async register(
-//     @Body() body: { email: string; password: string; role: string },
-//   ) {
-//     // Use lastValueFrom to await the observable from client.send()
-//     const response = await lastValueFrom(this.client.send('register', body));
-//     return response; // Return the response from the microservice
-//   }
-
-//   // Login route (for testing TCP communication)
-//   @Post('login')
-//   async login(@Body() body: { email: string; password: string }) {
-//     const response = await lastValueFrom(this.client.send('login', body)); // Await the observable result
-//     return response;
-//   }
-// }
-
-// api-gateway/src/app.controller.ts
-import { Controller, Get, Post, Body, Inject, Query } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Post,
+  Body,
+  Inject,
+  Query,
+  Res,
+  Req,
+  HttpStatus,
+  UseGuards,
+  HttpException,
+} from '@nestjs/common';
 import { ClientProxy } from '@nestjs/microservices';
 import { firstValueFrom } from 'rxjs';
+import type { Response, Request } from 'express';
+import { LoginDto } from './auth/dto/login.dto';
+import { JwtAuthGuard } from './auth/guards/jwt-auth.guard';
+import { RolesGuard } from './auth/guards/roles.guard';
+import { Roles } from './auth/decorators/roles.decorator';
+import { Role } from './auth/dto/role.enum';
 
-@Controller()
+interface AuthResponse {
+  accessToken: string;
+  newRefreshToken?: string;
+  refreshToken?: string;
+  role: Role;
+  status?: string;
+}
+
+interface AuthenticatedUserSafe {
+  id: number;
+  email: string;
+  firstName?: string;
+  lastName?: string;
+  mobileNumber?: string;
+  role: Role;
+  isConfirmed?: boolean;
+  drivingLicense?: string;
+  name?: string; // for admin
+}
+
+@Controller('auth')
 export class AppController {
   constructor(
     @Inject('AUTH_SERVICE') private readonly authClient: ClientProxy,
@@ -54,75 +52,248 @@ export class AppController {
 
   @Get()
   getHello() {
-    return { message: 'API Gateway is running 🚀' };
+    return { message: '.' };
   }
 
-  @Post('auth/register')
+  @Post('register')
   async register(@Body() createUserDto: any) {
-    return firstValueFrom(
-      this.authClient.send({ cmd: 'register' }, createUserDto),
+    if (!createUserDto || !createUserDto.role) {
+      throw new HttpException(
+        'Invalid registration data',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+    try {
+      // Ensure role enum matches microservice Role
+      createUserDto.role = createUserDto.role as Role;
+
+      return await firstValueFrom(
+        this.authClient.send({ cmd: 'register' }, createUserDto),
+      );
+    } catch (err) {
+      console.error('Microservice register error:', err);
+      throw new HttpException(
+        'Registration failed',
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
+
+  @Post('login')
+  async login(@Body() loginDto: LoginDto, @Res() res: Response) {
+    const result: AuthResponse = await firstValueFrom(
+      this.authClient.send({ cmd: 'login' }, loginDto),
     );
+
+    if (result?.status === 'error') {
+      return res.status(HttpStatus.BAD_REQUEST).json(result);
+    }
+
+    const { accessToken, refreshToken, role } = result;
+
+    res.cookie('refresh_token', refreshToken, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'strict',
+      path: '/',
+      maxAge: 7 * 24 * 60 * 60 * 1000,
+    });
+
+    return res.json({ accessToken, role, refreshToken });
   }
 
-  @Post('auth/login')
-  async login(@Body() loginDto: any) {
-    return firstValueFrom(this.authClient.send({ cmd: 'login' }, loginDto));
-  }
-
-  @Post('auth/logout')
-  async logout() {
-    return firstValueFrom(this.authClient.send({ cmd: 'logout' }, {}));
-  }
-
-  // Get all users
-  @Get('auth/users')
-  async getAllUsers() {
-    return firstValueFrom(this.authClient.send({ cmd: 'users' }, {}));
-  }
-
-  // Get user by email
-  @Get('auth/user')
-  async getUserByEmail(@Query('email') email: string) {
-    return firstValueFrom(this.authClient.send({ cmd: 'user/email' }, email));
-  }
-
-  // ------------------- DRIVERS -------------------
-
-  // Get all drivers
-  @Get('auth/drivers')
-  async getAllDrivers() {
-    return firstValueFrom(this.authClient.send({ cmd: 'drivers' }, {}));
-  }
-
-  // Get driver by email
-  @Get('auth/driver')
-  async getDriverByEmail(@Query('email') email: string) {
-    return firstValueFrom(this.authClient.send({ cmd: 'driver/email' }, email));
-  }
-  @Get('auth/confirm')
+  @Get('confirm')
   async confirmEmail(@Query('token') token: string) {
     return firstValueFrom(
       this.authClient.send({ cmd: 'confirm-registration' }, token),
     );
   }
 
-  // ------------------- PASSWORD RESET -------------------
+  // @Post('refresh')
+  // async refresh(@Req() req: Request, @Res() res: Response) {
+  //   const refreshToken = req.cookies?.refresh_token;
+  //   if (!refreshToken)
+  //     return res.status(HttpStatus.UNAUTHORIZED).json({ message: 'No token' });
 
-  // 1️⃣ Forgot Password (send OTP to email)
-  @Post('auth/forgot-password')
+  //   const result: AuthResponse = await firstValueFrom(
+  //     this.authClient.send({ cmd: 'refresh' }, { refreshToken }),
+  //   );
+
+  //   // Update cookie with new refresh token
+  //   res.cookie('refresh_token', result.refreshToken, {
+  //     httpOnly: true,
+  //     secure: process.env.NODE_ENV === 'production',
+  //     sameSite: 'strict',
+  //     maxAge: 7 * 24 * 60 * 60 * 1000,
+  //   });
+
+  //   return res.json({
+  //     accessToken: result.accessToken,
+  //     refreshToken: result.refreshToken,
+  //   });
+  // }
+  @Post('refresh')
+  async refresh(@Req() req: Request, @Res() res: Response) {
+    // 1) try header
+    const auth = req.headers['authorization'];
+    let refreshToken: string | undefined;
+
+    if (auth && auth.startsWith('Bearer ')) {
+      refreshToken = auth.slice('Bearer '.length);
+    } else {
+      // 2) fallback to cookie
+      refreshToken = req.cookies?.refresh_token;
+    }
+
+    if (!refreshToken) {
+      return res.status(HttpStatus.UNAUTHORIZED).json({ message: 'No token' });
+    }
+
+    // 3) send EXACT token to microservice
+    const result: AuthResponse = await firstValueFrom(
+      this.authClient.send({ cmd: 'refresh' }, { refreshToken }),
+    );
+
+    // 4) rotate cookie
+    res.cookie('refresh_token', result.refreshToken, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'strict',
+      maxAge: 7 * 24 * 60 * 60 * 1000,
+    });
+
+    return res.json({
+      accessToken: result.accessToken,
+      refreshToken: result.refreshToken,
+    });
+  }
+
+  @Post('logout')
+  async logout(@Req() req: Request, @Res() res: Response) {
+    try {
+      const refreshToken = req.cookies?.refresh_token;
+      if (!refreshToken)
+        return res
+          .status(HttpStatus.BAD_REQUEST)
+          .json({ message: 'No refresh token found' });
+
+      await firstValueFrom(
+        this.authClient.send({ cmd: 'logout' }, { refreshToken }),
+      );
+
+      res.clearCookie('refresh_token', {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'strict',
+        path: '/',
+      });
+
+      return res.json({ message: 'Logout successful' });
+    } catch (err) {
+      console.error('Logout Error:', err);
+      return res
+        .status(HttpStatus.INTERNAL_SERVER_ERROR)
+        .json({ message: 'Failed to logout' });
+    }
+  }
+
+  @Post('forgot-password')
   async forgotPassword(@Body('email') email: string) {
     return firstValueFrom(
       this.authClient.send({ cmd: 'forgot-password' }, email),
     );
   }
 
-  // 2️⃣ Reset Password (verify OTP + new password)
-  @Post('auth/reset-password')
+  @Post('reset-password')
   async resetPassword(
     @Body() body: { email: string; otp: string; newPassword: string },
   ) {
     return firstValueFrom(
       this.authClient.send({ cmd: 'reset-password' }, body),
     );
+  }
+
+  // @UseGuards(JwtAuthGuard)
+  // @Get('me')
+  // async getProfile(@Req() req: any): Promise<AuthenticatedUserSafe> {
+  //   const payload = req.user;
+  //   if (!payload?.id || !payload?.role) {
+  //     throw new HttpException('Invalid user data', HttpStatus.UNAUTHORIZED);
+  //   }
+
+  //   const user: AuthenticatedUserSafe = await firstValueFrom(
+  //     this.authClient.send(
+  //       { cmd: 'me' },
+  //       { userId: payload.id, role: payload.role },
+  //     ),
+  //   );
+
+  //   return user;
+  // }
+  @UseGuards(JwtAuthGuard)
+  @Get('profile')
+  async getProfile(@Req() req: any): Promise<AuthenticatedUserSafe> {
+    const { id, role } = req.user; // Get userId and role from the JWT payload
+
+    if (!id || !role) {
+      throw new HttpException('Invalid user data', HttpStatus.UNAUTHORIZED); // Ensure userId and role exist
+    }
+
+    try {
+      // Fetch user profile from microservice using userId and role
+      const user = await firstValueFrom(
+        this.authClient.send({ cmd: 'profile' }, { userId: id, role }), // Ensure correct communication pattern
+      );
+
+      if (!user) {
+        throw new HttpException('User profile not found', HttpStatus.NOT_FOUND); // If user profile is not found
+      }
+
+      return user; // Return the user profile
+    } catch (error) {
+      console.error('Error fetching profile:', error);
+      throw new HttpException(
+        'Failed to fetch profile',
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      ); // Error handling
+    }
+  }
+
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(Role.ADMIN)
+  @Get('riders')
+  async getAllRiders(): Promise<AuthenticatedUserSafe[]> {
+    return firstValueFrom(this.authClient.send({ cmd: 'riders' }, {}));
+  }
+
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(Role.ADMIN)
+  @Get('drivers')
+  async getAllDrivers(): Promise<AuthenticatedUserSafe[]> {
+    return firstValueFrom(this.authClient.send({ cmd: 'drivers' }, {}));
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Get('rider')
+  async getRiderByEmail(@Req() req: any, @Query('email') email: string) {
+    const loggedInUser = req.user;
+
+    if (loggedInUser.role !== Role.ADMIN && loggedInUser.email !== email) {
+      throw new HttpException('Forbidden', HttpStatus.FORBIDDEN);
+    }
+
+    return firstValueFrom(this.authClient.send({ cmd: 'rider/email' }, email));
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Get('driver')
+  async getDriverByEmail(@Req() req: any, @Query('email') email: string) {
+    const loggedInUser = req.user;
+
+    if (loggedInUser.role !== Role.ADMIN && loggedInUser.email !== email) {
+      throw new HttpException('Forbidden', HttpStatus.FORBIDDEN);
+    }
+
+    return firstValueFrom(this.authClient.send({ cmd: 'driver/email' }, email));
   }
 }
