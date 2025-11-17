@@ -108,30 +108,6 @@ export class AppController {
       this.authClient.send({ cmd: 'confirm-registration' }, token),
     );
   }
-
-  // @Post('refresh')
-  // async refresh(@Req() req: Request, @Res() res: Response) {
-  //   const refreshToken = req.cookies?.refresh_token;
-  //   if (!refreshToken)
-  //     return res.status(HttpStatus.UNAUTHORIZED).json({ message: 'No token' });
-
-  //   const result: AuthResponse = await firstValueFrom(
-  //     this.authClient.send({ cmd: 'refresh' }, { refreshToken }),
-  //   );
-
-  //   // Update cookie with new refresh token
-  //   res.cookie('refresh_token', result.refreshToken, {
-  //     httpOnly: true,
-  //     secure: process.env.NODE_ENV === 'production',
-  //     sameSite: 'strict',
-  //     maxAge: 7 * 24 * 60 * 60 * 1000,
-  //   });
-
-  //   return res.json({
-  //     accessToken: result.accessToken,
-  //     refreshToken: result.refreshToken,
-  //   });
-  // }
   @Post('refresh')
   async refresh(@Req() req: Request, @Res() res: Response) {
     // 1) try header
@@ -213,23 +189,6 @@ export class AppController {
     );
   }
 
-  // @UseGuards(JwtAuthGuard)
-  // @Get('me')
-  // async getProfile(@Req() req: any): Promise<AuthenticatedUserSafe> {
-  //   const payload = req.user;
-  //   if (!payload?.id || !payload?.role) {
-  //     throw new HttpException('Invalid user data', HttpStatus.UNAUTHORIZED);
-  //   }
-
-  //   const user: AuthenticatedUserSafe = await firstValueFrom(
-  //     this.authClient.send(
-  //       { cmd: 'me' },
-  //       { userId: payload.id, role: payload.role },
-  //     ),
-  //   );
-
-  //   return user;
-  // }
   @UseGuards(JwtAuthGuard)
   @Get('profile')
   async getProfile(@Req() req: any): Promise<AuthenticatedUserSafe> {
