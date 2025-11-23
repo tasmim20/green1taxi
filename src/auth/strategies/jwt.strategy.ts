@@ -4,7 +4,6 @@
 /* eslint-disable @typescript-eslint/no-unsafe-call */
 import { Injectable } from '@nestjs/common';
 import { PassportStrategy } from '@nestjs/passport';
-
 import { ExtractJwt, Strategy } from 'passport-jwt';
 import { JwtPayload } from '../interfaces/jwt-payload.interface';
 @Injectable()
@@ -21,7 +20,7 @@ export class JwtStrategy extends PassportStrategy(Strategy, 'jwt') {
     return {
       email: payload.email,
       role: payload.role,
-      sub: payload.sub,
+      id: payload.id,
     };
   }
 }

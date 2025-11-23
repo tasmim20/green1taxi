@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-floating-promises */
 /* eslint-disable prettier/prettier */
 import * as dotenv from 'dotenv';
 dotenv.config();

@@ -1,3 +1,5 @@
+/* eslint-disable @typescript-eslint/no-unsafe-argument */
+/* eslint-disable prettier/prettier */
 /* eslint-disable @typescript-eslint/no-unsafe-call */
 /* eslint-disable @typescript-eslint/no-unsafe-assignment */
 /* eslint-disable @typescript-eslint/no-unsafe-member-access */
@@ -7,55 +9,46 @@ import {
   Get,
   Post,
   Body,
-  Inject,
   Query,
-  Res,
   Req,
+  Res,
   HttpStatus,
-  UseGuards,
   HttpException,
+  OnModuleInit,
+  Inject,
+  UseGuards,
 } from '@nestjs/common';
-import { ClientProxy } from '@nestjs/microservices';
+import type { ClientGrpc } from '@nestjs/microservices';
 import { firstValueFrom } from 'rxjs';
 import type { Response, Request } from 'express';
 import { LoginDto } from './auth/dto/login.dto';
-import { JwtAuthGuard } from './auth/guards/jwt-auth.guard';
-import { RolesGuard } from './auth/guards/roles.guard';
-import { Roles } from './auth/decorators/roles.decorator';
 import { Role } from './auth/dto/role.enum';
+import type {
+  CreateProfileRequest,
+  CreateProfileResponse,
+  GetProfileResponse,
+} from './user/user.interface';
+import { JwtAuthGuard } from './auth/guards/jwt-auth.guard';
+import { AuthResponse, AuthService, UserService } from './interface/interface';
 
-interface AuthResponse {
-  accessToken: string;
-  newRefreshToken?: string;
-  refreshToken?: string;
-  role: Role;
-  status?: string;
-}
+@Controller()
+export class AppController implements OnModuleInit {
+  private authService: AuthService;
+  private userService: UserService;
+  getHello: any;
 
-interface AuthenticatedUserSafe {
-  id: number;
-  email: string;
-  firstName?: string;
-  lastName?: string;
-  mobileNumber?: string;
-  role: Role;
-  isConfirmed?: boolean;
-  drivingLicense?: string;
-  name?: string; // for admin
-}
-
-@Controller('auth')
-export class AppController {
   constructor(
-    @Inject('AUTH_SERVICE') private readonly authClient: ClientProxy,
+    @Inject('AUTH_SERVICE') private readonly authClient: ClientGrpc,
+    @Inject('USER_SERVICE') private readonly userClient: ClientGrpc,
   ) {}
 
-  @Get()
-  getHello() {
-    return { message: '.' };
+  onModuleInit() {
+    this.authService = this.authClient.getService<AuthService>('AuthService');
+    this.userService = this.userClient.getService<UserService>('UserService');
   }
 
-  @Post('register')
+  // ----------------- Auth Endpoints -----------------
+  @Post('auth/register')
   async register(@Body() createUserDto: any) {
     if (!createUserDto || !createUserDto.role) {
       throw new HttpException(
@@ -63,34 +56,19 @@ export class AppController {
         HttpStatus.BAD_REQUEST,
       );
     }
-    try {
-      // Ensure role enum matches microservice Role
-      createUserDto.role = createUserDto.role as Role;
-
-      return await firstValueFrom(
-        this.authClient.send({ cmd: 'register' }, createUserDto),
-      );
-    } catch (err) {
-      console.error('Microservice register error:', err);
-      throw new HttpException(
-        'Registration failed',
-        HttpStatus.INTERNAL_SERVER_ERROR,
-      );
-    }
+    createUserDto.role = createUserDto.role as Role;
+    return firstValueFrom(this.authService.Register(createUserDto));
   }
 
-  @Post('login')
+  @Post('auth/login')
   async login(@Body() loginDto: LoginDto, @Res() res: Response) {
     const result: AuthResponse = await firstValueFrom(
-      this.authClient.send({ cmd: 'login' }, loginDto),
+      this.authService.Login(loginDto),
     );
-
-    if (result?.status === 'error') {
+    if (result?.status === 'error')
       return res.status(HttpStatus.BAD_REQUEST).json(result);
-    }
 
     const { accessToken, refreshToken, role } = result;
-
     res.cookie('refresh_token', refreshToken, {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
@@ -99,42 +77,38 @@ export class AppController {
       maxAge: 7 * 24 * 60 * 60 * 1000,
     });
 
-    return res.json({ accessToken, role, refreshToken });
+    return res.json({ accessToken, refreshToken, role });
   }
 
-  @Get('confirm')
+  @Get('auth/confirm')
   async confirmEmail(@Query('token') token: string) {
-    return firstValueFrom(
-      this.authClient.send({ cmd: 'confirm-registration' }, token),
-    );
+    return firstValueFrom(this.authService.ConfirmRegistration({ token }));
   }
-  @Post('refresh')
-  async refresh(@Req() req: Request, @Res() res: Response) {
-    // 1) try header
-    const auth = req.headers['authorization'];
-    let refreshToken: string | undefined;
 
-    if (auth && auth.startsWith('Bearer ')) {
-      refreshToken = auth.slice('Bearer '.length);
+  @Post('auth/refresh')
+  async refresh(@Req() req: Request, @Res() res: Response) {
+    const authHeader = req.headers['authorization'];
+    let refreshToken: string | undefined;
+    if (
+      authHeader &&
+      typeof authHeader === 'string' &&
+      authHeader.startsWith('Bearer ')
+    ) {
+      refreshToken = authHeader.slice('Bearer '.length);
     } else {
-      // 2) fallback to cookie
       refreshToken = req.cookies?.refresh_token;
     }
-
-    if (!refreshToken) {
+    if (!refreshToken)
       return res.status(HttpStatus.UNAUTHORIZED).json({ message: 'No token' });
-    }
 
-    // 3) send EXACT token to microservice
     const result: AuthResponse = await firstValueFrom(
-      this.authClient.send({ cmd: 'refresh' }, { refreshToken }),
+      this.authService.RefreshToken({ refreshToken }),
     );
-
-    // 4) rotate cookie
     res.cookie('refresh_token', result.refreshToken, {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
       sameSite: 'strict',
+      path: '/',
       maxAge: 7 * 24 * 60 * 60 * 1000,
     });
 
@@ -144,26 +118,22 @@ export class AppController {
     });
   }
 
-  @Post('logout')
+  @Post('auth/logout')
   async logout(@Req() req: Request, @Res() res: Response) {
+    const refreshToken = req.cookies?.refresh_token;
+    if (!refreshToken)
+      return res
+        .status(HttpStatus.BAD_REQUEST)
+        .json({ message: 'No refresh token found' });
+
     try {
-      const refreshToken = req.cookies?.refresh_token;
-      if (!refreshToken)
-        return res
-          .status(HttpStatus.BAD_REQUEST)
-          .json({ message: 'No refresh token found' });
-
-      await firstValueFrom(
-        this.authClient.send({ cmd: 'logout' }, { refreshToken }),
-      );
-
+      await firstValueFrom(this.authService.Logout({ refreshToken }));
       res.clearCookie('refresh_token', {
         httpOnly: true,
         secure: process.env.NODE_ENV === 'production',
         sameSite: 'strict',
         path: '/',
       });
-
       return res.json({ message: 'Logout successful' });
     } catch (err) {
       console.error('Logout Error:', err);
@@ -173,86 +143,55 @@ export class AppController {
     }
   }
 
-  @Post('forgot-password')
+  @Post('auth/forgot-password')
   async forgotPassword(@Body('email') email: string) {
-    return firstValueFrom(
-      this.authClient.send({ cmd: 'forgot-password' }, email),
-    );
+    return firstValueFrom(this.authService.ForgotPassword({ email }));
   }
 
-  @Post('reset-password')
+  @Post('auth/reset-password')
   async resetPassword(
     @Body() body: { email: string; otp: string; newPassword: string },
   ) {
-    return firstValueFrom(
-      this.authClient.send({ cmd: 'reset-password' }, body),
-    );
+    return firstValueFrom(this.authService.ResetPassword(body));
   }
 
-  @UseGuards(JwtAuthGuard)
-  @Get('profile')
-  async getProfile(@Req() req: any): Promise<AuthenticatedUserSafe> {
-    const { id, role } = req.user; // Get userId and role from the JWT payload
-
-    if (!id || !role) {
-      throw new HttpException('Invalid user data', HttpStatus.UNAUTHORIZED); // Ensure userId and role exist
+  // ----------------- User Endpoints -----------------
+  @Post('user/create')
+  async createUserProfile(@Body() body: CreateProfileRequest) {
+    try {
+      const response: CreateProfileResponse = await firstValueFrom(
+        this.userService.createProfile(body),
+      );
+      return response;
+    } catch (err) {
+      console.error('UserService CreateProfile Error:', err);
+      throw new HttpException(
+        'Failed to create profile',
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
     }
+  }
+  @UseGuards(JwtAuthGuard)
+  @Get('user/profile')
+  async getUserProfile(
+    @Query('userId') userId: string,
+    @Query('role') role: string,
+  ): Promise<GetProfileResponse> {
+    // decoded from token
+
+    const request = { userId: Number(userId), role };
 
     try {
-      // Fetch user profile from microservice using userId and role
-      const user = await firstValueFrom(
-        this.authClient.send({ cmd: 'profile' }, { userId: id, role }), // Ensure correct communication pattern
-      );
-
-      if (!user) {
-        throw new HttpException('User profile not found', HttpStatus.NOT_FOUND); // If user profile is not found
+      const profile = await this.userService.getProfile(request);
+      if (!profile) {
+        throw new HttpException('Profile not found', HttpStatus.NOT_FOUND);
       }
-
-      return user; // Return the user profile
-    } catch (error) {
-      console.error('Error fetching profile:', error);
+      return profile;
+    } catch {
       throw new HttpException(
         'Failed to fetch profile',
         HttpStatus.INTERNAL_SERVER_ERROR,
-      ); // Error handling
+      );
     }
-  }
-
-  @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(Role.ADMIN)
-  @Get('riders')
-  async getAllRiders(): Promise<AuthenticatedUserSafe[]> {
-    return firstValueFrom(this.authClient.send({ cmd: 'riders' }, {}));
-  }
-
-  @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(Role.ADMIN)
-  @Get('drivers')
-  async getAllDrivers(): Promise<AuthenticatedUserSafe[]> {
-    return firstValueFrom(this.authClient.send({ cmd: 'drivers' }, {}));
-  }
-
-  @UseGuards(JwtAuthGuard)
-  @Get('rider')
-  async getRiderByEmail(@Req() req: any, @Query('email') email: string) {
-    const loggedInUser = req.user;
-
-    if (loggedInUser.role !== Role.ADMIN && loggedInUser.email !== email) {
-      throw new HttpException('Forbidden', HttpStatus.FORBIDDEN);
-    }
-
-    return firstValueFrom(this.authClient.send({ cmd: 'rider/email' }, email));
-  }
-
-  @UseGuards(JwtAuthGuard)
-  @Get('driver')
-  async getDriverByEmail(@Req() req: any, @Query('email') email: string) {
-    const loggedInUser = req.user;
-
-    if (loggedInUser.role !== Role.ADMIN && loggedInUser.email !== email) {
-      throw new HttpException('Forbidden', HttpStatus.FORBIDDEN);
-    }
-
-    return firstValueFrom(this.authClient.send({ cmd: 'driver/email' }, email));
   }
 }
