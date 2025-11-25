@@ -1,8 +1,4 @@
-import { Role } from 'src/auth/dto/role.enum';
-import {
-  CreateProfileRequest,
-  GetProfileRequest,
-} from 'src/user/user.interface';
+import { Role } from '../dto/role.enum';
 
 export interface AuthResponse {
   accessToken: string;
@@ -24,10 +20,4 @@ export interface AuthService {
     otp: string;
     newPassword: string;
   }): any;
-}
-
-// ---------------- gRPC User Service ----------------
-export interface UserService {
-  createProfile(payload: CreateProfileRequest): any;
-  getProfile(payload: GetProfileRequest): any;
 }

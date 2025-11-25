@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-unused-vars */
 /* eslint-disable @typescript-eslint/no-unsafe-argument */
 /* eslint-disable prettier/prettier */
 /* eslint-disable @typescript-eslint/no-unsafe-call */
@@ -27,9 +28,10 @@ import type {
   CreateProfileRequest,
   CreateProfileResponse,
   GetProfileResponse,
+  UserService,
 } from './user/user.interface';
 import { JwtAuthGuard } from './auth/guards/jwt-auth.guard';
-import { AuthResponse, AuthService, UserService } from './interface/interface';
+import { AuthResponse, AuthService } from './auth/interfaces/auth-interface';
 
 @Controller()
 export class AppController implements OnModuleInit {
@@ -171,6 +173,7 @@ export class AppController implements OnModuleInit {
       );
     }
   }
+
   @UseGuards(JwtAuthGuard)
   @Get('user/profile')
   async getUserProfile(

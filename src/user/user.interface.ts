@@ -33,3 +33,7 @@ export interface GetProfileResponse {
   bio?: string;
   address?: string;
 }
+export interface UserService {
+  createProfile(payload: CreateProfileRequest): any;
+  getProfile(payload: GetProfileRequest): any;
+}
