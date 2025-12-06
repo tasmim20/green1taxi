@@ -1,3 +1,4 @@
+/* eslint-disable prettier/prettier */
 /* eslint-disable @typescript-eslint/no-unsafe-call */
 /* eslint-disable @typescript-eslint/no-unused-vars */
 /* eslint-disable @typescript-eslint/no-unsafe-assignment */
@@ -24,9 +25,11 @@ export class JwtAuthGuard implements CanActivate {
     const token = authHeader.replace('Bearer ', '');
     try {
       const decoded = this.jwtService.verify(token); // use same secret as AuthService
+      // console.log('decoded token', decoded);
       request.user = decoded; // attach user info to request
       return true;
     } catch (err: any) {
+      console.log('Access token expired or invalidd');
       throw new UnauthorizedException('Invalid token');
     }
   }

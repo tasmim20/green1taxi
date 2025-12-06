@@ -1,3 +1,5 @@
+import { Observable } from 'rxjs';
+
 export type Role = 'RIDER' | 'DRIVER' | 'ADMIN';
 
 export interface CreateProfileRequest {
@@ -7,6 +9,7 @@ export interface CreateProfileRequest {
   firstName: string;
   lastName: string;
   profilePhoto?: string;
+  mobileNumber?: string;
   bio?: string;
   address?: string;
 }
@@ -30,10 +33,54 @@ export interface GetProfileResponse {
   email: string;
   role: string;
   profilePhoto?: string;
+  mobileNumber?: string;
   bio?: string;
   address?: string;
 }
+export interface UpdateProfileRequest {
+  userId: number;
+  role: string;
+  firstName?: string;
+  lastName?: string;
+  profilePhoto?: string;
+  mobileNumber?: string;
+  bio?: string;
+  address?: string;
+}
+export interface DeleteProfileRequest {
+  userId: number;
+  role: string;
+}
+
+// export interface UserService {
+//   createProfile(data: CreateProfileRequest): Promise<CreateProfileResponse>;
+//   getProfile(data: {
+//     userId: number;
+//     role: string;
+//   }): Promise<GetProfileResponse | null>;
+
+//   // Add updateProfile method
+//   updateProfile(
+//     userId: number,
+//     role: string,
+//     updateData: Partial<
+//       Omit<CreateProfileRequest, 'role' | 'email' | 'userId'>
+//     >,
+//   ): Promise<GetProfileResponse>;
+
+//   // Add deleteProfile method
+//   deleteProfile(
+//     userId: number,
+//     role: string,
+//   ): Promise<{ success: boolean; message: string }>;
+// }
 export interface UserService {
-  createProfile(payload: CreateProfileRequest): any;
-  getProfile(payload: GetProfileRequest): any;
+  createProfile(
+    request: CreateProfileRequest,
+  ): Observable<CreateProfileResponse>;
+  updateProfile(request: UpdateProfileRequest): Observable<GetProfileResponse>;
+  deleteProfile(
+    request: DeleteProfileRequest,
+  ): Observable<{ success: boolean; message: string }>;
+  getProfile(request: GetProfileRequest): Observable<GetProfileResponse>;
 }

@@ -36,6 +36,15 @@ dotenv.config();
           url: `${process.env.USER_SERVICE_HOST}:${process.env.USER_SERVICE_PORT}`,
         },
       },
+      {
+        name: 'EMAIL_SERVICE', // Add User Service
+        transport: Transport.GRPC,
+        options: {
+          package: 'email',
+          protoPath: join(__dirname, '../proto/email.proto'),
+          url: `${process.env.EMAIL_SERVICE_HOST}:${process.env.EMAIL_SERVICE_PORT}`,
+        },
+      },
     ]),
 
     // JWT + Passport
@@ -52,3 +61,15 @@ dotenv.config();
   providers: [AppService, JwtStrategy],
 })
 export class AppModule {}
+
+// import { Module } from '@nestjs/common';
+// import { AuthModule } from './auth/auth.module';
+// import { UserModule } from './user/user.module';
+// // Import UserModule
+
+// @Module({
+//   imports: [AuthModule, UserModule], // Import both Auth and User modules
+//   controllers: [],
+//   providers: [],
+// })
+// export class AppModule {}
