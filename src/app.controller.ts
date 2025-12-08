@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-redundant-type-constituents */
 /* eslint-disable @typescript-eslint/no-unused-vars */
 /* eslint-disable @typescript-eslint/no-unsafe-argument */
 /* eslint-disable prettier/prettier */
@@ -20,6 +21,8 @@ import {
   UseGuards,
   Patch,
   Delete,
+  UseInterceptors,
+  UploadedFile,
 } from '@nestjs/common';
 import type { ClientGrpc } from '@nestjs/microservices';
 import { firstValueFrom } from 'rxjs';
@@ -39,6 +42,8 @@ import { AuthResponse, AuthService } from './auth/interfaces/auth-interface';
 import { CurrentUser } from './auth/decorators/current-user.decorator';
 import { PermissionsGuard } from './auth/guards/PremissionsGuard';
 import { Permissions } from './auth/decorators/perimisson.decorator';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { multerCloudinaryOptions } from './cloudinary/multer-cloudinary';
 
 const Roles = {
   RIDER: 'RIDER' as Role,
@@ -64,7 +69,14 @@ export class AppController implements OnModuleInit {
 
   // ----------------- Auth Endpoints -----------------
   @Post('auth/register')
-  async register(@Body() createUserDto: any) {
+  @UseInterceptors(FileInterceptor('photo', multerCloudinaryOptions))
+  async register(
+    @UploadedFile() photo: Express.Multer.File | undefined,
+    @Body() createUserDto: any,
+  ) {
+    // console.log('photo:', photo); // check if file is received
+    // console.log('body:', createUserDto);
+
     if (!createUserDto || !createUserDto.role) {
       throw new HttpException(
         'Invalid registration data',
@@ -72,6 +84,11 @@ export class AppController implements OnModuleInit {
       );
     }
     createUserDto.role = createUserDto.role as Role;
+    // Safely assign profilePhoto
+    if (photo) {
+      createUserDto.profilePhoto = photo.path;
+    }
+    console.log('DTO before gRPC call:', createUserDto); // check it
     return firstValueFrom(this.authService.Register(createUserDto));
   }
 
@@ -94,55 +111,6 @@ export class AppController implements OnModuleInit {
 
     return res.json({ accessToken, refreshToken, role });
   }
-  // @Post('auth/refresh')
-  // async refresh(@Req() req: Request, @Res() res: Response) {
-  //   try {
-  //     const authHeader = req.headers['authorization'];
-  //     let refreshToken: string | undefined;
-  //     if (
-  //       authHeader &&
-  //       typeof authHeader === 'string' &&
-  //       authHeader.startsWith('Bearer ')
-  //     ) {
-  //       refreshToken = authHeader.slice('Bearer '.length);
-  //     } else {
-  //       refreshToken = req.cookies?.refresh_token;
-  //     }
-  //     if (!refreshToken)
-  //       return res
-  //         .status(HttpStatus.UNAUTHORIZED)
-  //         .json({ message: 'No token' });
-
-  //     const result: AuthResponse = await firstValueFrom(
-  //       this.authService.RefreshToken({ refreshToken }),
-  //     );
-
-  //     if (!result || !result.accessToken || !result.refreshToken) {
-  //       return res
-  //         .status(HttpStatus.UNAUTHORIZED)
-  //         .json({ message: 'Invalid refresh token' });
-  //     }
-
-  //     res.cookie('refresh_token', result.refreshToken, {
-  //       httpOnly: true,
-  //       secure: process.env.NODE_ENV === 'production',
-  //       sameSite: 'strict',
-  //       path: '/',
-  //       maxAge: 7 * 24 * 60 * 60 * 1000,
-  //     });
-
-  //     return res.json({
-  //       accessToken: result.accessToken,
-  //       refreshToken: result.refreshToken,
-  //     });
-  //   } catch (err) {
-  //     console.error('❌ Failed to refresh token:', err);
-  //     return res.status(HttpStatus.INTERNAL_SERVER_ERROR).json({
-  //       message: 'Failed to refresh token',
-  //       error: err instanceof Error ? err.message : err,
-  //     });
-  //   }
-  // }
 
   @Post('auth/refresh')
   async refresh(@Req() req: Request, @Res() res: Response) {
@@ -195,31 +163,6 @@ export class AppController implements OnModuleInit {
   async confirmEmail(@Query('token') token: string) {
     return firstValueFrom(this.authService.ConfirmRegistration({ token }));
   }
-
-  // @Post('auth/logout')
-  // async logout(@Req() req: Request, @Res() res: Response) {
-  //   const refreshToken = req.cookies?.refresh_token;
-  //   if (!refreshToken)
-  //     return res
-  //       .status(HttpStatus.BAD_REQUEST)
-  //       .json({ message: 'No refresh token found' });
-
-  //   try {
-  //     await firstValueFrom(this.authService.Logout({ refreshToken }));
-  //     res.clearCookie('refresh_token', {
-  //       httpOnly: true,
-  //       secure: process.env.NODE_ENV === 'production',
-  //       sameSite: 'strict',
-  //       path: '/',
-  //     });
-  //     return res.json({ message: 'Logout successful' });
-  //   } catch (err) {
-  //     console.error('Logout Error:', err);
-  //     return res
-  //       .status(HttpStatus.INTERNAL_SERVER_ERROR)
-  //       .json({ message: 'Failed to logout' });
-  //   }
-  // }
 
   @Post('auth/logout')
   async logout(@Req() req: Request, @Res() res: Response) {
@@ -277,20 +220,6 @@ export class AppController implements OnModuleInit {
   }
 
   // ----------------- User Endpoints -----------------
-  //   @Post('user/create')
-  //   async createUserProfile(@Body() body: CreateProfileRequest) {
-  //     try {
-  //       const response: CreateProfileResponse =
-  //         await this.userService.createProfile(body);
-  //       return response;
-  //     } catch (err) {
-  //       console.error('UserService CreateProfile Error:', err);
-  //       throw new HttpException(
-  //         'Failed to create profile',
-  //         HttpStatus.INTERNAL_SERVER_ERROR,
-  //       );
-  //     }
-  //   }
   @Post('user/create')
   async createUserProfile(@Body() body: CreateProfileRequest) {
     try {
@@ -329,30 +258,47 @@ export class AppController implements OnModuleInit {
       );
     }
   }
-
   @UseGuards(JwtAuthGuard, PermissionsGuard)
   @Patch('user/profile/update')
-  @Permissions([
-    { field: 'profilePhoto', allowedRoles: [Roles.RIDER] }, // Only RIDER can update profilePhoto
-  ])
+  @UseInterceptors(FileInterceptor('profilePhoto', multerCloudinaryOptions))
   async updateUserProfile(
     @CurrentUser() user: { id: number; role: Role },
-    @Body() body: UpdateProfileDto,
-  ): Promise<GetProfileResponse> {
-    // Call gRPC client method (the actual gRPC method name, e.g., 'UpdateProfile')
-    const observable = this.userService.updateProfile({
-      userId: user.id,
-      role: user.role,
-      firstName: body.firstName ?? '',
-      lastName: body.lastName ?? '',
-      profilePhoto: body.profilePhoto ?? '',
-      mobileNumber: body.mobileNumber ?? '',
-      bio: body.bio ?? '',
-      address: body.address ?? '',
-    });
+    @UploadedFile() file: Express.Multer.File | undefined,
+    @Body() body: any,
+  ) {
+    // Only assign new photo if uploaded
+    let profilePhotoToUpdate: string | undefined = undefined;
+    if (file) {
+      console.log('Uploaded file:', file); // check file.path
+      profilePhotoToUpdate = file.path; // Cloudinary URL
+    }
 
-    // Convert Observable → Promise for REST controller
-    return await firstValueFrom(observable);
+    const payload: any = {
+      firstName: body.firstName ?? undefined,
+      lastName: body.lastName ?? undefined,
+      mobileNumber: body.mobileNumber ?? undefined,
+      bio: body.bio ?? undefined,
+      address: body.address ?? undefined,
+    };
+
+    // Only add profilePhoto if a new file exists
+    if (profilePhotoToUpdate) {
+      payload.profilePhoto = profilePhotoToUpdate;
+    }
+
+    console.log('Payload sent to userService:', payload);
+
+    const updatedProfile = await firstValueFrom(
+      this.userService.updateProfile({
+        userId: user.id,
+        role: user.role,
+        ...payload,
+      }),
+    );
+
+    console.log('Updated profile from user-service:', updatedProfile);
+
+    return updatedProfile;
   }
 
   @UseGuards(JwtAuthGuard)

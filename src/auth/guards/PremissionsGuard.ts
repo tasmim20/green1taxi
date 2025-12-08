@@ -30,7 +30,8 @@ export class PermissionsGuard implements CanActivate {
     const user: { id: number; role: Role } = request.user;
 
     for (const permission of requiredPermissions) {
-      if (permission.field in request.body) {
+      // Only check if body exists
+      if (request.body && permission.field in request.body) {
         if (!permission.allowedRoles.includes(user.role)) {
           throw new ForbiddenException(
             `You do not have permission to update field: ${permission.field}`,
